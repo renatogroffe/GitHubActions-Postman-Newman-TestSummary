@@ -1,0 +1,65 @@
+name: postman-newman
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NOME_IMAGEM: apifinancas-newman
+  CAMINHO_PROJETO_WEBAPP: ./APIFinancas
+  CAMINHO_TESTES: ./Tests
+  NOME_APLICACAO: apifinancas
+
+jobs:
+  build-tests-push:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2.3.4
+      
+    - name: Build de imagem
+      run: |
+        cd ${{ env.CAMINHO_PROJETO_WEBAPP }}
+        docker build . --file Dockerfile --tag ${{ secrets.AZURECR_REGISTRY }}/${{ env.NOME_IMAGEM }}:latest
+        
+    - name: Criação de container para testes com a API
+      run: |
+        docker run --name api-testes -p 1234:80 -d ${{ secrets.AZURECR_REGISTRY }}/${{ env.NOME_IMAGEM }}:latest
+        docker container ls
+
+    - name: Configurar porta da API no arquivo com os testes
+      run: |
+        cd ${{ env.CAMINHO_TESTES }}
+        sed -i 's/5000/1234/' CalculoJurosCompostos.postman_collection.json
+        
+    - name: Execução dos testes da API com Newman, além de geração de HTML Report + XML do JUnit
+      if: always()
+      run: |
+        cd ${{ env.CAMINHO_TESTES }}
+        echo "** Versão Global do Newman **"
+        newman -v
+        npm install newman-reporter-htmlextra@1.22.9
+        npm install newman-reporter-junitfullreport@1.0.4
+        npx newman run CalculoJurosCompostos.postman_collection.json -d data-tests.json -r cli,htmlextra,junitfullreport        
+        echo "** Arquivos + diretórios gerados **"
+        cd newman
+        ls
+    - name: Criar Test Summary
+      uses: test-summary/action@v1.0
+      env:
+        CAMINHO_RESULTADO_TESTES: ${{ env.CAMINHO_TESTES }}/newman/*.xml
+      if: always()
+      with:
+        paths: ${{ env.CAMINHO_RESULTADO_TESTES }}        
+    - name: Upload como Artifact do Report + XML com resultado dos testes (Postman + Newman)
+      uses: actions/upload-artifact@v2.2.3
+      env:
+        CAMINHO_RESULTADO_TESTES: ${{ env.CAMINHO_TESTES }}/newman/
+      if: always()
+      with:
+        name: resultado-testes
+        path: ${{ env.CAMINHO_RESULTADO_TESTES }}
+        retention-days: 30
